@@ -1,0 +1,102 @@
+############################
+# Environment & Secrets
+############################
+.env
+.env.*
+!.env.example
+
+############################
+# Node.js
+############################
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-lock.yaml
+package-lock.json
+
+############################
+# Logs
+############################
+logs/
+*.log
+
+############################
+# Flutter / Dart
+############################
+.dart_tool/
+.packages
+.pub/
+.pub-cache/
+build/
+.flutter-plugins
+.flutter-plugins-dependencies
+
+############################
+# Android
+############################
+android/.gradle/
+android/local.properties
+android/key.properties
+android/app/debug.keystore
+android/app/upload-keystore.jks
+*.keystore
+*.jks
+
+############################
+# iOS / macOS
+############################
+ios/Pods/
+ios/.symlinks/
+ios/Flutter/Flutter.framework
+ios/Flutter/Flutter.podspec
+ios/Flutter/App.framework
+ios/Flutter/engine/
+ios/Flutter/Generated.xcconfig
+ios/Flutter/flutter_export_environment.sh
+ios/Runner.xcworkspace
+ios/Runner/GeneratedPluginRegistrant.*
+
+############################
+# Web
+############################
+web/.dart_tool/
+web/build/
+
+############################
+# Google / Firebase
+############################
+google-services.json
+GoogleService-Info.plist
+client_secret*.json
+
+############################
+# Database
+############################
+*.sql
+*.sqlite
+*.db
+
+############################
+# IDEs & Editors
+############################
+.vscode/
+.idea/
+*.iml
+*.ipr
+*.iws
+
+############################
+# OS Files
+############################
+.DS_Store
+Thumbs.db
+desktop.ini
+
+############################
+# Temporary / Backup
+############################
+*.bak
+*.tmp
+*.swp
+*~
