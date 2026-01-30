@@ -18,6 +18,29 @@ class User {
     const [rows] = await db.execute(`SELECT * FROM users WHERE google_id = ?`, [google_id]);
     return rows[0];
   }
+
+  static async saveOTP(email, otp, expiry) {
+  await db.query(
+    `UPDATE users SET reset_otp=?, reset_otp_expires=? WHERE email=?`,
+    [otp, expiry, email]
+  );
+}
+
+  static async verifyOTP(email, otp) {
+    const [rows] = await db.query(
+      `SELECT * FROM users WHERE email=? AND reset_otp=? AND reset_otp_expires > NOW()`,
+      [email, otp]
+    );
+    return rows[0];
+  }
+
+  static async updatePassword(userId, password) {
+    await db.query(
+      `UPDATE users SET password=?, reset_otp=NULL, reset_otp_expires=NULL WHERE id=?`,
+      [password, userId]
+    );
+  }
+
 }
 
 module.exports = User;

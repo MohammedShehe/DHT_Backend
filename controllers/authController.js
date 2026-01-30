@@ -82,6 +82,64 @@ class AuthController {
       res.status(500).json({ message: "Google login failed." });
     }
   }
+
+    static async sendResetOTP(req, res) {
+    try {
+      const { email } = req.body;
+      if (!email) return res.status(400).json({ message: "Email required." });
+
+      const user = await User.findByEmail(email);
+      if (!user) return res.status(404).json({ message: "Email not registered." });
+
+      const otp = require('../services/otpService').generateOTP();
+      const expiry = new Date(Date.now() + 10 * 60 * 1000); // 10 mins
+
+      await User.saveOTP(email, otp, expiry);
+      await require('../services/emailService').sendOTP(email, otp);
+
+      res.json({ message: "OTP sent to email." });
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ message: "Failed to send OTP." });
+    }
+  }
+
+  static async verifyResetOTP(req, res) {
+  try {
+    const { email, otp } = req.body;
+
+    const user = await User.verifyOTP(email, otp);
+    if (!user) {
+      return res.status(400).json({ message: "Invalid or expired OTP." });
+    }
+
+    res.json({ message: "OTP verified." });
+  } catch (err) {
+    res.status(500).json({ message: "OTP verification failed." });
+  }
+}
+
+  static async resetPassword(req, res) {
+    try {
+      const { email, otp, password, confirm_password } = req.body;
+
+      if (password !== confirm_password) {
+        return res.status(400).json({ message: "Passwords do not match." });
+      }
+
+      const user = await User.verifyOTP(email, otp);
+      if (!user) {
+        return res.status(400).json({ message: "Invalid or expired OTP." });
+      }
+
+      const hashedPassword = await require('../services/passwordService').hashPassword(password);
+      await User.updatePassword(user.id, hashedPassword);
+
+      res.json({ message: "Password reset successful." });
+    } catch (err) {
+      res.status(500).json({ message: "Password reset failed." });
+    }
+  }
 }
 
 module.exports = AuthController;
