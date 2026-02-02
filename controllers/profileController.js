@@ -1,0 +1,81 @@
+const User = require('../models/User');
+const { comparePassword, hashPassword } = require('../services/passwordService');
+const { generateOTP } = require('../services/otpService');
+const { sendOTP } = require('../services/emailService');
+
+class ProfileController {
+
+  // View profile
+  static async getProfile(req, res) {
+    const user = await User.findById(req.user.id);
+    res.json(user);
+  }
+
+  // Update name
+  static async updateName(req, res) {
+    const { full_name } = req.body;
+    if (!full_name) return res.status(400).json({ message: "Name required" });
+
+    await User.updateName(req.user.id, full_name);
+    res.json({ message: "Name updated successfully" });
+  }
+
+  // Request email change
+  static async requestEmailChange(req, res) {
+    const { new_email } = req.body;
+    if (!new_email) return res.status(400).json({ message: "New email required" });
+
+    const otp = generateOTP();
+    const expiry = new Date(Date.now() + 10 * 60 * 1000);
+
+    await User.requestEmailChange(req.user.id, new_email, otp, expiry);
+    await sendOTP(new_email, otp);
+
+    res.json({ message: "OTP sent to new email" });
+  }
+
+  // Confirm email change
+  static async confirmEmailChange(req, res) {
+    const { otp } = req.body;
+
+    const user = await User.verifyEmailOTP(req.user.id, otp);
+    if (!user) {
+      return res.status(400).json({ message: "Invalid or expired OTP" });
+    }
+
+    await User.confirmEmailChange(req.user.id);
+    res.json({ message: "Email updated successfully" });
+  }
+
+  // Upload profile picture
+  static async uploadProfilePic(req, res) {
+    if (!req.file) return res.status(400).json({ message: "Image required" });
+
+    await User.updateProfilePic(req.user.id, req.file.path);
+    res.json({ message: "Profile picture updated" });
+  }
+
+  // Change password
+  static async changePassword(req, res) {
+    const { current_password, new_password, confirm_password } = req.body;
+
+    if (new_password !== confirm_password) {
+      return res.status(400).json({ message: "Passwords do not match" });
+    }
+
+    const user = await User.findById(req.user.id);
+    const dbUser = await require('../models/User').findByEmail(user.email);
+
+    const valid = await comparePassword(current_password, dbUser.password);
+    if (!valid) {
+      return res.status(400).json({ message: "Current password incorrect" });
+    }
+
+    const hashed = await hashPassword(new_password);
+    await User.updatePasswordDirect(req.user.id, hashed);
+
+    res.json({ message: "Password changed successfully" });
+  }
+}
+
+module.exports = ProfileController;
