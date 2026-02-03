@@ -14,7 +14,7 @@ module.exports = async (req, res, next) => {
   // 🔥 Check blacklist
   const blacklisted = await TokenBlacklist.isBlacklisted(token);
   if (blacklisted) {
-    return res.status(401).json({ message: "Token expired. Please login again." });
+    return res.status(401).json({ message: "Session expired. Please login again." });
   }
 
   try {

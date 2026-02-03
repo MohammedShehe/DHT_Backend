@@ -14,7 +14,9 @@ class ProfileController {
   // Update name
   static async updateName(req, res) {
     const { full_name } = req.body;
-    if (!full_name) return res.status(400).json({ message: "Name required" });
+    if (!full_name) {
+      return res.status(400).json({ message: "Name required" });
+    }
 
     await User.updateName(req.user.id, full_name);
     res.json({ message: "Name updated successfully" });
@@ -23,7 +25,25 @@ class ProfileController {
   // Request email change
   static async requestEmailChange(req, res) {
     const { new_email } = req.body;
-    if (!new_email) return res.status(400).json({ message: "New email required" });
+    if (!new_email) {
+      return res.status(400).json({ message: "New email required" });
+    }
+
+    // ✅ CHECK if email already exists
+    const existingUser = await User.findByEmail(new_email);
+    if (existingUser) {
+      return res.status(400).json({
+        message: "This email is already registered with another account."
+      });
+    }
+
+    // ✅ CHECK if new email is same as current email
+    const currentUser = await User.findById(req.user.id);
+    if (currentUser.email === new_email) {
+      return res.status(400).json({
+        message: "New email cannot be the same as your current email."
+      });
+    }
 
     const otp = generateOTP();
     const expiry = new Date(Date.now() + 10 * 60 * 1000);
@@ -49,7 +69,9 @@ class ProfileController {
 
   // Upload profile picture
   static async uploadProfilePic(req, res) {
-    if (!req.file) return res.status(400).json({ message: "Image required" });
+    if (!req.file) {
+      return res.status(400).json({ message: "Image required" });
+    }
 
     await User.updateProfilePic(req.user.id, req.file.path);
     res.json({ message: "Profile picture updated" });
@@ -64,7 +86,7 @@ class ProfileController {
     }
 
     const user = await User.findById(req.user.id);
-    const dbUser = await require('../models/User').findByEmail(user.email);
+    const dbUser = await User.findByEmail(user.email);
 
     const valid = await comparePassword(current_password, dbUser.password);
     if (!valid) {

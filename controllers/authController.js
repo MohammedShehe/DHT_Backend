@@ -28,10 +28,14 @@ class AuthController {
       const hashedPassword = await hashPassword(password);
       const userId = await User.create({ full_name, email, password: hashedPassword });
 
-      return res.status(201).json({ message: "User registered successfully.", userId });
+      const newUser = await User.findById(userId);
+
+      const token = generateToken(newUser);
+
+      return res.status(201).json({ message: "User registered successfully.", userId, token });
     } catch (err) {
       console.error(err);
-      res.status(500).json({ message: "Server error." });
+      return res.status(500).json({ message: "Internal server error" });
     }
   }
 
@@ -53,7 +57,7 @@ class AuthController {
       res.json({ message: "Login successful.", token });
     } catch (err) {
       console.error(err);
-      res.status(500).json({ message: "Server error." });
+      return res.status(500).json({ message: "Internal server error" });
     }
   }
 

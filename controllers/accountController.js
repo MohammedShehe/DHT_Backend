@@ -32,8 +32,8 @@ class AccountController {
 
       res.json({ message: "Deletion OTP sent to your email" });
     } catch (err) {
-      console.error(err);
-      res.status(500).json({ message: "Failed to initiate deletion" });
+      console.error('Delete request error:', err.message);
+      res.status(500).json({ message: "Account deletion process failed. Please try again." });
     }
   }
 
