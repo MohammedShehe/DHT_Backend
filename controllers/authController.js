@@ -61,10 +61,21 @@ class AuthController {
     }
   }
 
-  // Google OAuth login
+  // Google OAuth login - handles both ID tokens and access tokens
   static async googleLogin(req, res) {
     try {
-      const { token } = req.body;
+      const { token, accessToken } = req.body;
+      
+      // If accessToken is provided but token (idToken) is not, use accessToken
+      if (!token && accessToken) {
+        return await AuthController.googleLoginWithAccessToken(req, res);
+      }
+      
+      // Original ID token verification logic
+      if (!token) {
+        return res.status(400).json({ message: "Google token required." });
+      }
+
       const ticket = await client.verifyIdToken({
         idToken: token,
         audience: process.env.GOOGLE_CLIENT_ID
@@ -75,19 +86,118 @@ class AuthController {
 
       let user = await User.findByGoogleId(sub);
       if (!user) {
-        const userId = await User.create({ full_name: name, email, google_id: sub });
+        const userId = await User.create({ full_name: name, email, password: null, google_id: sub });
         user = { id: userId, full_name: name, email };
       }
 
       const jwtToken = generateToken(user);
       res.json({ message: "Google login successful.", token: jwtToken });
     } catch (err) {
-      console.error(err);
+      console.error('Google login error:', err.message);
       res.status(500).json({ message: "Google login failed." });
     }
   }
 
-    static async sendResetOTP(req, res) {
+  // Google login with access token
+  static async googleLoginWithAccessToken(req, res) {
+    try {
+      const { accessToken } = req.body;
+      
+      if (!accessToken) {
+        return res.status(400).json({ message: "Access token required." });
+      }
+
+      // Use Node.js native https module
+      const https = require('https');
+      
+      // Make request to Google API to get user info
+      const userInfo = await new Promise((resolve, reject) => {
+        const options = {
+          hostname: 'www.googleapis.com',
+          path: '/oauth2/v3/userinfo',
+          method: 'GET',
+          headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            'Accept': 'application/json'
+          }
+        };
+        
+        const request = https.request(options, (response) => {
+          let data = '';
+          
+          response.on('data', (chunk) => {
+            data += chunk;
+          });
+          
+          response.on('end', () => {
+            try {
+              const parsedData = JSON.parse(data);
+              
+              if (response.statusCode >= 200 && response.statusCode < 300) {
+                resolve(parsedData);
+              } else {
+                reject(new Error(`Google API error: ${parsedData.error?.message || 'Unknown error'}`));
+              }
+            } catch (parseError) {
+              reject(new Error(`Failed to parse Google API response: ${parseError.message}`));
+            }
+          });
+        });
+        
+        request.on('error', (error) => {
+          reject(new Error(`Google API request failed: ${error.message}`));
+        });
+        
+        request.setTimeout(10000, () => {
+          request.destroy();
+          reject(new Error('Google API request timeout'));
+        });
+        
+        request.end();
+      });
+
+      // Validate user info
+      if (!userInfo || !userInfo.sub || !userInfo.email) {
+        throw new Error('Invalid user info from Google');
+      }
+
+      const googleId = userInfo.sub;
+      const email = userInfo.email;
+      const name = userInfo.name || userInfo.email.split('@')[0] || 'Google User';
+
+      // Find or create user
+      let user = await User.findByEmail(email);
+      
+      if (!user) {
+        user = await User.findByGoogleId(googleId);
+        
+        if (!user) {
+          const userId = await User.create({ 
+            full_name: name, 
+            email: email, 
+            password: null, 
+            google_id: googleId 
+          });
+          user = { 
+            id: userId, 
+            full_name: name, 
+            email: email 
+          };
+        }
+      } else if (!user.google_id) {
+        await User.updateGoogleId(user.id, googleId);
+      }
+
+      const jwtToken = generateToken(user);
+      res.json({ message: "Google login successful.", token: jwtToken });
+      
+    } catch (err) {
+      console.error('Google login with access token error:', err.message);
+      res.status(500).json({ message: "Google login failed." });
+    }
+  }
+
+  static async sendResetOTP(req, res) {
     try {
       const { email } = req.body;
       if (!email) return res.status(400).json({ message: "Email required." });
@@ -96,7 +206,7 @@ class AuthController {
       if (!user) return res.status(404).json({ message: "Email not registered." });
 
       const otp = require('../services/otpService').generateOTP();
-      const expiry = new Date(Date.now() + 10 * 60 * 1000); // 10 mins
+      const expiry = new Date(Date.now() + 10 * 60 * 1000);
 
       await User.saveOTP(email, otp, expiry);
       await require('../services/emailService').sendOTP(email, otp);
@@ -109,19 +219,19 @@ class AuthController {
   }
 
   static async verifyResetOTP(req, res) {
-  try {
-    const { email, otp } = req.body;
+    try {
+      const { email, otp } = req.body;
 
-    const user = await User.verifyOTP(email, otp);
-    if (!user) {
-      return res.status(400).json({ message: "Invalid or expired OTP." });
+      const user = await User.verifyOTP(email, otp);
+      if (!user) {
+        return res.status(400).json({ message: "Invalid or expired OTP." });
+      }
+
+      res.json({ message: "OTP verified." });
+    } catch (err) {
+      res.status(500).json({ message: "OTP verification failed." });
     }
-
-    res.json({ message: "OTP verified." });
-  } catch (err) {
-    res.status(500).json({ message: "OTP verification failed." });
   }
-}
 
   static async resetPassword(req, res) {
     try {
