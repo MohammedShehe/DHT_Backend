@@ -98,6 +98,67 @@ class ProfileController {
 
     res.json({ message: "Password changed successfully" });
   }
+
+  // Check if user has password
+  static async hasPassword(req, res) {
+    try {
+      const user = await User.findById(req.user.id);
+
+      // Fetch password explicitly (in case it's hidden in findById)
+      const dbUser = await User.findByEmail(user.email);
+
+      res.json({ hasPassword: !!dbUser.password });
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ message: "Failed to check password status" });
+    }
+  }
+
+  // ✅ UPDATED: Setup password (ONLY for Google/OAuth users without password)
+  static async setupPassword(req, res) {
+    try {
+      const { password, confirm_password } = req.body;
+
+      if (!password || !confirm_password) {
+        return res.status(400).json({ message: "All fields are required" });
+      }
+
+      if (password !== confirm_password) {
+        return res.status(400).json({ message: "Passwords do not match" });
+      }
+
+      if (password.length < 8) {
+        return res.status(400).json({ message: "Password must be at least 8 characters" });
+      }
+
+      // Check for password requirements
+      if (!/[A-Z]/.test(password)) {
+        return res.status(400).json({ message: "Password must contain at least one uppercase letter" });
+      }
+
+      if (!/[0-9]/.test(password)) {
+        return res.status(400).json({ message: "Password must contain at least one number" });
+      }
+
+      const user = await User.findById(req.user.id);
+      const dbUser = await User.findByEmail(user.email);
+
+      // Only allow password setup if user doesn't have a password (Google/OAuth users)
+      if (dbUser.password) {
+        return res.status(400).json({
+          message: "Password already exists. Use change password instead."
+        });
+      }
+
+      const hashed = await hashPassword(password);
+      await User.updatePasswordDirect(req.user.id, hashed);
+
+      res.json({ message: "Password setup successful" });
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ message: "Failed to setup password" });
+    }
+  }
 }
 
 module.exports = ProfileController;

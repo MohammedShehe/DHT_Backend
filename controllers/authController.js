@@ -1,10 +1,55 @@
+const jwt = require('jsonwebtoken');
 const User = require('../models/User');
-const { hashPassword, comparePassword } = require('../services/passwordService');
-const { generateToken } = require('../services/jwtService');
-const { OAuth2Client } = require('google-auth-library');
+const { comparePassword, hashPassword } = require('../services/passwordService'); // Added hashPassword
+const { generateOTP } = require('../services/otpService');
+const { sendOTP } = require('../services/emailService');
+const db = require('../config/db');
+const { OAuth2Client } = require('google-auth-library'); // Added OAuth2Client
 require('dotenv').config();
 
 const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
+
+// Add this new method to check user existence for Google
+const checkGoogleUserExistence = async (googleId, email) => {
+  try {
+    // Check by Google ID first
+    let user = await User.findByGoogleId(googleId);
+    if (user) {
+      return {
+        exists: true,
+        user: user,
+        requiresPasswordSetup: !user.password
+      };
+    }
+    
+    // Check by email (in case user signed up with email/password first)
+    user = await User.findByEmail(email);
+    if (user) {
+      return {
+        exists: true,
+        user: user,
+        requiresPasswordSetup: !user.password
+      };
+    }
+    
+    return {
+      exists: false,
+      user: null,
+      requiresPasswordSetup: false
+    };
+  } catch (error) {
+    throw error;
+  }
+};
+
+// Add generateToken function (or import it from jwtService)
+const generateToken = (user) => {
+  return jwt.sign(
+    { id: user.id, email: user.email },
+    process.env.JWT_SECRET,
+    { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
+  );
+};
 
 class AuthController {
   // Email/password registration
@@ -64,11 +109,11 @@ class AuthController {
   // Google OAuth login - handles both ID tokens and access tokens
   static async googleLogin(req, res) {
     try {
-      const { token, accessToken } = req.body;
+      const { token, accessToken, check_existence } = req.body;
       
       // If accessToken is provided but token (idToken) is not, use accessToken
       if (!token && accessToken) {
-        return await AuthController.googleLoginWithAccessToken(req, res);
+        return await AuthController.googleLoginWithAccessToken(req, res, check_existence);
       }
       
       // Original ID token verification logic
@@ -84,6 +129,16 @@ class AuthController {
       const payload = ticket.getPayload();
       const { sub, email, name } = payload;
 
+      // Check if this is just an existence check
+      if (check_existence) {
+        const existence = await checkGoogleUserExistence(sub, email);
+        return res.json({
+          message: "User existence checked",
+          userExists: existence.exists,
+          requiresPasswordSetup: existence.requiresPasswordSetup
+        });
+      }
+
       let user = await User.findByGoogleId(sub);
       if (!user) {
         const userId = await User.create({ full_name: name, email, password: null, google_id: sub });
@@ -91,7 +146,11 @@ class AuthController {
       }
 
       const jwtToken = generateToken(user);
-      res.json({ message: "Google login successful.", token: jwtToken });
+      res.json({ 
+        message: "Google login successful.", 
+        token: jwtToken,
+        requiresPasswordSetup: !user.password
+      });
     } catch (err) {
       console.error('Google login error:', err.message);
       res.status(500).json({ message: "Google login failed." });
@@ -99,7 +158,7 @@ class AuthController {
   }
 
   // Google login with access token
-  static async googleLoginWithAccessToken(req, res) {
+  static async googleLoginWithAccessToken(req, res, check_existence = false) {
     try {
       const { accessToken } = req.body;
       
@@ -165,6 +224,16 @@ class AuthController {
       const email = userInfo.email;
       const name = userInfo.name || userInfo.email.split('@')[0] || 'Google User';
 
+      // Check if this is just an existence check
+      if (check_existence) {
+        const existence = await checkGoogleUserExistence(googleId, email);
+        return res.json({
+          message: "User existence checked",
+          userExists: existence.exists,
+          requiresPasswordSetup: existence.requiresPasswordSetup
+        });
+      }
+
       // Find or create user
       let user = await User.findByEmail(email);
       
@@ -189,7 +258,11 @@ class AuthController {
       }
 
       const jwtToken = generateToken(user);
-      res.json({ message: "Google login successful.", token: jwtToken });
+      res.json({ 
+        message: "Google login successful.", 
+        token: jwtToken,
+        requiresPasswordSetup: !user.password
+      });
       
     } catch (err) {
       console.error('Google login with access token error:', err.message);
@@ -246,7 +319,7 @@ class AuthController {
         return res.status(400).json({ message: "Invalid or expired OTP." });
       }
 
-      const hashedPassword = await require('../services/passwordService').hashPassword(password);
+      const hashedPassword = await hashPassword(password);
       await User.updatePassword(user.id, hashedPassword);
 
       res.json({ message: "Password reset successful." });
