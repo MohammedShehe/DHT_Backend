@@ -3,6 +3,7 @@ const User = require('../models/User');
 const { comparePassword, hashPassword } = require('../services/passwordService'); // Added hashPassword
 const { generateOTP } = require('../services/otpService');
 const { sendOTP } = require('../services/emailService');
+const { sendWelcomeEmail } = require('../services/emailService'); 
 const db = require('../config/db');
 const { OAuth2Client } = require('google-auth-library'); // Added OAuth2Client
 require('dotenv').config();
@@ -74,6 +75,10 @@ class AuthController {
       const userId = await User.create({ full_name, email, password: hashedPassword });
 
       const newUser = await User.findById(userId);
+
+      // ✅ Send welcome email (non-blocking is better)
+      sendWelcomeEmail(email, full_name)
+        .catch(err => console.error("Welcome email failed:", err.message));
 
       const token = generateToken(newUser);
 
