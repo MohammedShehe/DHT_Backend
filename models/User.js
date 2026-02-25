@@ -2,12 +2,12 @@ const db = require('../config/db');
 
 class User {
   static async create({ full_name, email, password, google_id = null }) {
-    // Ensure all values are properly defined (convert undefined to null)
     const passwordValue = password === undefined ? null : password;
     const googleIdValue = google_id === undefined ? null : google_id;
     
     const [result] = await db.execute(
-      `INSERT INTO users (full_name, email, password, google_id) VALUES (?, ?, ?, ?)`,
+      `INSERT INTO users (full_name, email, password, google_id) 
+       VALUES (?, ?, ?, ?)`,
       [full_name, email, passwordValue, googleIdValue]
     );
     return result.insertId;
@@ -20,6 +20,16 @@ class User {
 
   static async findByGoogleId(google_id) {
     const [rows] = await db.execute(`SELECT * FROM users WHERE google_id = ?`, [google_id]);
+    return rows[0];
+  }
+
+  static async findById(id) {
+    const [rows] = await db.query(
+      `SELECT id, full_name, email, profile_pic, google_id, 
+              CASE WHEN password IS NOT NULL THEN true ELSE false END as has_password 
+       FROM users WHERE id=?`,
+      [id]
+    );
     return rows[0];
   }
 
@@ -50,14 +60,6 @@ class User {
       `UPDATE users SET password=?, reset_otp=NULL, reset_otp_expires=NULL WHERE id=?`,
       [password, userId]
     );
-  }
-
-  static async findById(id) {
-    const [rows] = await db.query(
-      `SELECT id, full_name, email, profile_pic FROM users WHERE id=?`,
-      [id]
-    );
-    return rows[0];
   }
 
   static async updateName(userId, full_name) {
@@ -131,15 +133,6 @@ class User {
       [userId, otp]
     );
     return rows[0];
-  }
-
-  static async clearDeleteOTP(userId) {
-    await db.query(
-      `UPDATE users 
-       SET delete_otp=NULL, delete_otp_expires=NULL 
-       WHERE id=?`,
-      [userId]
-    );
   }
 }
 

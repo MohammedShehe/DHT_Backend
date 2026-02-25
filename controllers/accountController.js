@@ -5,11 +5,8 @@ const { comparePassword } = require('../services/passwordService');
 const { generateOTP } = require('../services/otpService');
 const { sendOTP } = require('../services/emailService');
 const db = require('../config/db');
-require('dotenv').config();
 
 class AccountController {
-
-  // STEP 1️⃣ Request account deletion (send email OTP)
   static async requestDelete(req, res) {
     try {
       const { password } = req.body;
@@ -18,26 +15,27 @@ class AccountController {
       }
 
       const user = await User.findByEmail(req.user.email);
-      const valid = await comparePassword(password, user.password);
-
-      if (!valid) {
-        return res.status(400).json({ message: "Incorrect password" });
+      
+      if (user.password) {
+        const valid = await comparePassword(password, user.password);
+        if (!valid) {
+          return res.status(400).json({ message: "Incorrect password" });
+        }
       }
 
       const otp = generateOTP();
-      const expiry = new Date(Date.now() + 10 * 60 * 1000); // 10 mins
+      const expiry = new Date(Date.now() + 10 * 60 * 1000);
 
       await User.saveDeleteOTP(req.user.id, otp, expiry);
       await sendOTP(user.email, otp);
 
       res.json({ message: "Deletion OTP sent to your email" });
     } catch (err) {
-      console.error('Delete request error:', err.message);
-      res.status(500).json({ message: "Account deletion process failed. Please try again." });
+      console.error('Delete request error:', err);
+      res.status(500).json({ message: "Account deletion process failed." });
     }
   }
 
-  // STEP 2️⃣ Confirm deletion with OTP
   static async confirmDelete(req, res) {
     try {
       const { otp } = req.body;
@@ -50,7 +48,23 @@ class AccountController {
         return res.status(400).json({ message: "Invalid or expired OTP" });
       }
 
-      // Delete user
+      // Get user info before deletion for cleanup
+      const user = await User.findById(req.user.id);
+      
+      // Delete profile picture if exists
+      if (user?.profile_pic) {
+        try {
+          const fs = require('fs').promises;
+          const path = require('path');
+          const filePath = path.join(__dirname, '..', user.profile_pic);
+          await fs.access(filePath);
+          await fs.unlink(filePath);
+        } catch (err) {
+          // File doesn't exist or can't be accessed, ignore
+        }
+      }
+
+      // Delete user (cascades to all related data)
       await db.query(`DELETE FROM users WHERE id=?`, [req.user.id]);
 
       // Blacklist current token
@@ -62,12 +76,11 @@ class AccountController {
 
       res.json({ message: "Account deleted permanently" });
     } catch (err) {
-      console.error(err);
+      console.error('Delete confirmation error:', err);
       res.status(500).json({ message: "Account deletion failed" });
     }
   }
 
-  // Logout (unchanged)
   static async logout(req, res) {
     try {
       const decoded = jwt.decode(req.token);
@@ -77,6 +90,7 @@ class AccountController {
       );
       res.json({ message: "Logged out successfully" });
     } catch (err) {
+      console.error('Logout error:', err);
       res.status(500).json({ message: "Logout failed" });
     }
   }

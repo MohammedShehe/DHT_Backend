@@ -1,19 +1,23 @@
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
-const { comparePassword, hashPassword } = require('../services/passwordService'); // Added hashPassword
+const { comparePassword, hashPassword } = require('../services/passwordService');
 const { generateOTP } = require('../services/otpService');
-const { sendOTP } = require('../services/emailService');
-const { sendWelcomeEmail } = require('../services/emailService'); 
-const db = require('../config/db');
-const { OAuth2Client } = require('google-auth-library'); // Added OAuth2Client
+const { sendOTP, sendWelcomeEmail } = require('../services/emailService');
+const { OAuth2Client } = require('google-auth-library');
 require('dotenv').config();
 
 const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
-// Add this new method to check user existence for Google
+const generateToken = (user) => {
+  return jwt.sign(
+    { id: user.id, email: user.email },
+    process.env.JWT_SECRET,
+    { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
+  );
+};
+
 const checkGoogleUserExistence = async (googleId, email) => {
   try {
-    // Check by Google ID first
     let user = await User.findByGoogleId(googleId);
     if (user) {
       return {
@@ -23,7 +27,6 @@ const checkGoogleUserExistence = async (googleId, email) => {
       };
     }
     
-    // Check by email (in case user signed up with email/password first)
     user = await User.findByEmail(email);
     if (user) {
       return {
@@ -43,27 +46,21 @@ const checkGoogleUserExistence = async (googleId, email) => {
   }
 };
 
-// Add generateToken function (or import it from jwtService)
-const generateToken = (user) => {
-  return jwt.sign(
-    { id: user.id, email: user.email },
-    process.env.JWT_SECRET,
-    { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
-  );
-};
-
 class AuthController {
-  // Email/password registration
   static async register(req, res) {
     try {
       const { full_name, email, password, confirm_password } = req.body;
 
-      if (!full_name || !email || !password || !confirm_password) {
+      if (!full_name?.trim() || !email?.trim() || !password || !confirm_password) {
         return res.status(400).json({ message: "All fields are required." });
       }
 
       if (password !== confirm_password) {
         return res.status(400).json({ message: "Passwords do not match." });
+      }
+
+      if (password.length < 8) {
+        return res.status(400).json({ message: "Password must be at least 8 characters." });
       }
 
       const existingUser = await User.findByEmail(email);
@@ -72,56 +69,80 @@ class AuthController {
       }
 
       const hashedPassword = await hashPassword(password);
-      const userId = await User.create({ full_name, email, password: hashedPassword });
+      const userId = await User.create({ 
+        full_name: full_name.trim(), 
+        email: email.trim().toLowerCase(), 
+        password: hashedPassword 
+      });
 
       const newUser = await User.findById(userId);
 
-      // ✅ Send welcome email (non-blocking is better)
-      sendWelcomeEmail(email, full_name)
+      sendWelcomeEmail(email, full_name.trim())
         .catch(err => console.error("Welcome email failed:", err.message));
 
       const token = generateToken(newUser);
 
-      return res.status(201).json({ message: "User registered successfully.", userId, token });
+      return res.status(201).json({ 
+        message: "User registered successfully.", 
+        user: {
+          id: newUser.id,
+          full_name: newUser.full_name,
+          email: newUser.email,
+          profile_pic: newUser.profile_pic
+        },
+        token 
+      });
     } catch (err) {
-      console.error(err);
-      return res.status(500).json({ message: "Internal server error" });
+      console.error('Registration error:', err);
+      return res.status(500).json({ message: "Registration failed. Please try again." });
     }
   }
 
-  // Email/password login
   static async login(req, res) {
     try {
       const { email, password } = req.body;
-      if (!email || !password) {
+      if (!email?.trim() || !password) {
         return res.status(400).json({ message: "Email and password required." });
       }
 
-      const user = await User.findByEmail(email);
+      const user = await User.findByEmail(email.trim().toLowerCase());
       if (!user) return res.status(400).json({ message: "Invalid credentials." });
+
+      if (!user.password) {
+        return res.status(400).json({ 
+          message: "This account uses Google Sign-In. Please login with Google or set a password."
+        });
+      }
 
       const validPassword = await comparePassword(password, user.password);
       if (!validPassword) return res.status(400).json({ message: "Invalid credentials." });
 
       const token = generateToken(user);
-      res.json({ message: "Login successful.", token });
+      
+      res.json({ 
+        message: "Login successful.", 
+        token,
+        user: {
+          id: user.id,
+          full_name: user.full_name,
+          email: user.email,
+          profile_pic: user.profile_pic
+        }
+      });
     } catch (err) {
-      console.error(err);
-      return res.status(500).json({ message: "Internal server error" });
+      console.error('Login error:', err);
+      return res.status(500).json({ message: "Login failed. Please try again." });
     }
   }
 
-  // Google OAuth login - handles both ID tokens and access tokens
   static async googleLogin(req, res) {
     try {
       const { token, accessToken, check_existence } = req.body;
       
-      // If accessToken is provided but token (idToken) is not, use accessToken
-      if (!token && accessToken) {
+      if (accessToken) {
         return await AuthController.googleLoginWithAccessToken(req, res, check_existence);
       }
       
-      // Original ID token verification logic
       if (!token) {
         return res.status(400).json({ message: "Google token required." });
       }
@@ -132,9 +153,8 @@ class AuthController {
       });
 
       const payload = ticket.getPayload();
-      const { sub, email, name } = payload;
+      const { sub, email, name, picture } = payload;
 
-      // Check if this is just an existence check
       if (check_existence) {
         const existence = await checkGoogleUserExistence(sub, email);
         return res.json({
@@ -145,15 +165,34 @@ class AuthController {
       }
 
       let user = await User.findByGoogleId(sub);
+      
       if (!user) {
-        const userId = await User.create({ full_name: name, email, password: null, google_id: sub });
-        user = { id: userId, full_name: name, email };
+        const existingUser = await User.findByEmail(email);
+        if (existingUser) {
+          await User.updateGoogleId(existingUser.id, sub);
+          user = existingUser;
+        } else {
+          const userId = await User.create({ 
+            full_name: name, 
+            email, 
+            password: null, 
+            google_id: sub 
+          });
+          user = await User.findById(userId);
+        }
       }
 
       const jwtToken = generateToken(user);
+      
       res.json({ 
         message: "Google login successful.", 
         token: jwtToken,
+        user: {
+          id: user.id,
+          full_name: user.full_name,
+          email: user.email,
+          profile_pic: user.profile_pic || picture
+        },
         requiresPasswordSetup: !user.password
       });
     } catch (err) {
@@ -162,7 +201,6 @@ class AuthController {
     }
   }
 
-  // Google login with access token
   static async googleLoginWithAccessToken(req, res, check_existence = false) {
     try {
       const { accessToken } = req.body;
@@ -171,10 +209,8 @@ class AuthController {
         return res.status(400).json({ message: "Access token required." });
       }
 
-      // Use Node.js native https module
       const https = require('https');
       
-      // Make request to Google API to get user info
       const userInfo = await new Promise((resolve, reject) => {
         const options = {
           hostname: 'www.googleapis.com',
@@ -183,15 +219,14 @@ class AuthController {
           headers: {
             'Authorization': `Bearer ${accessToken}`,
             'Accept': 'application/json'
-          }
+          },
+          timeout: 10000
         };
         
         const request = https.request(options, (response) => {
           let data = '';
           
-          response.on('data', (chunk) => {
-            data += chunk;
-          });
+          response.on('data', (chunk) => { data += chunk; });
           
           response.on('end', () => {
             try {
@@ -200,19 +235,16 @@ class AuthController {
               if (response.statusCode >= 200 && response.statusCode < 300) {
                 resolve(parsedData);
               } else {
-                reject(new Error(`Google API error: ${parsedData.error?.message || 'Unknown error'}`));
+                reject(new Error(parsedData.error?.message || 'Google API error'));
               }
             } catch (parseError) {
-              reject(new Error(`Failed to parse Google API response: ${parseError.message}`));
+              reject(new Error('Failed to parse Google API response'));
             }
           });
         });
         
-        request.on('error', (error) => {
-          reject(new Error(`Google API request failed: ${error.message}`));
-        });
-        
-        request.setTimeout(10000, () => {
+        request.on('error', reject);
+        request.on('timeout', () => {
           request.destroy();
           reject(new Error('Google API request timeout'));
         });
@@ -220,16 +252,15 @@ class AuthController {
         request.end();
       });
 
-      // Validate user info
-      if (!userInfo || !userInfo.sub || !userInfo.email) {
+      if (!userInfo?.sub || !userInfo?.email) {
         throw new Error('Invalid user info from Google');
       }
 
       const googleId = userInfo.sub;
       const email = userInfo.email;
-      const name = userInfo.name || userInfo.email.split('@')[0] || 'Google User';
+      const name = userInfo.name || email.split('@')[0];
+      const picture = userInfo.picture;
 
-      // Check if this is just an existence check
       if (check_existence) {
         const existence = await checkGoogleUserExistence(googleId, email);
         return res.json({
@@ -239,7 +270,6 @@ class AuthController {
         });
       }
 
-      // Find or create user
       let user = await User.findByEmail(email);
       
       if (!user) {
@@ -248,29 +278,32 @@ class AuthController {
         if (!user) {
           const userId = await User.create({ 
             full_name: name, 
-            email: email, 
+            email, 
             password: null, 
             google_id: googleId 
           });
-          user = { 
-            id: userId, 
-            full_name: name, 
-            email: email 
-          };
+          user = await User.findById(userId);
         }
       } else if (!user.google_id) {
         await User.updateGoogleId(user.id, googleId);
       }
 
       const jwtToken = generateToken(user);
+      
       res.json({ 
         message: "Google login successful.", 
         token: jwtToken,
+        user: {
+          id: user.id,
+          full_name: user.full_name,
+          email: user.email,
+          profile_pic: user.profile_pic || picture
+        },
         requiresPasswordSetup: !user.password
       });
       
     } catch (err) {
-      console.error('Google login with access token error:', err.message);
+      console.error('Google access token login error:', err.message);
       res.status(500).json({ message: "Google login failed." });
     }
   }
@@ -278,20 +311,24 @@ class AuthController {
   static async sendResetOTP(req, res) {
     try {
       const { email } = req.body;
-      if (!email) return res.status(400).json({ message: "Email required." });
+      if (!email?.trim()) {
+        return res.status(400).json({ message: "Email required." });
+      }
 
-      const user = await User.findByEmail(email);
-      if (!user) return res.status(404).json({ message: "Email not registered." });
+      const user = await User.findByEmail(email.trim().toLowerCase());
+      if (!user) {
+        return res.status(404).json({ message: "Email not registered." });
+      }
 
-      const otp = require('../services/otpService').generateOTP();
+      const otp = generateOTP();
       const expiry = new Date(Date.now() + 10 * 60 * 1000);
 
       await User.saveOTP(email, otp, expiry);
-      await require('../services/emailService').sendOTP(email, otp);
+      await sendOTP(email, otp);
 
       res.json({ message: "OTP sent to email." });
     } catch (err) {
-      console.error(err);
+      console.error('Send OTP error:', err);
       res.status(500).json({ message: "Failed to send OTP." });
     }
   }
@@ -300,13 +337,18 @@ class AuthController {
     try {
       const { email, otp } = req.body;
 
-      const user = await User.verifyOTP(email, otp);
+      if (!email?.trim() || !otp) {
+        return res.status(400).json({ message: "Email and OTP required." });
+      }
+
+      const user = await User.verifyOTP(email.trim().toLowerCase(), otp);
       if (!user) {
         return res.status(400).json({ message: "Invalid or expired OTP." });
       }
 
       res.json({ message: "OTP verified." });
     } catch (err) {
+      console.error('Verify OTP error:', err);
       res.status(500).json({ message: "OTP verification failed." });
     }
   }
@@ -315,11 +357,19 @@ class AuthController {
     try {
       const { email, otp, password, confirm_password } = req.body;
 
+      if (!email?.trim() || !otp || !password || !confirm_password) {
+        return res.status(400).json({ message: "All fields required." });
+      }
+
       if (password !== confirm_password) {
         return res.status(400).json({ message: "Passwords do not match." });
       }
 
-      const user = await User.verifyOTP(email, otp);
+      if (password.length < 8) {
+        return res.status(400).json({ message: "Password must be at least 8 characters." });
+      }
+
+      const user = await User.verifyOTP(email.trim().toLowerCase(), otp);
       if (!user) {
         return res.status(400).json({ message: "Invalid or expired OTP." });
       }
@@ -329,6 +379,7 @@ class AuthController {
 
       res.json({ message: "Password reset successful." });
     } catch (err) {
+      console.error('Reset password error:', err);
       res.status(500).json({ message: "Password reset failed." });
     }
   }
