@@ -15,7 +15,7 @@ class NotificationQueue {
         preference.title,
         preference.message,
         preference.action_type,
-        preference.action_data,
+        preference.action_data ? JSON.stringify(preference.action_data) : null,
         scheduledFor
       ]);
     }
@@ -30,6 +30,8 @@ class NotificationQueue {
          VALUES ${placeholders}`,
         flatValues
       );
+      
+      console.log(`✅ Added ${values.length} notifications to queue`);
     }
 
     return { queued: values.length };
@@ -96,8 +98,26 @@ class NotificationQueue {
     
     const scheduled = new Date(now);
     scheduled.setHours(hours, minutes, seconds || 0, 0);
+    scheduled.setSeconds(0, 0);
+    scheduled.setMilliseconds(0);
 
-    // If time has passed today, schedule for tomorrow
+    // Add a 30-second buffer to handle same-minute scheduling
+    const bufferMs = 30 * 1000;
+    const timeDiff = scheduled.getTime() - now.getTime();
+    
+    // If scheduled time is in the future (more than buffer), use it as is
+    if (timeDiff > bufferMs) {
+      return scheduled;
+    }
+    
+    // If scheduled time is within the buffer (including slightly in the past),
+    // set it for the next minute to ensure it gets processed
+    if (timeDiff <= bufferMs && timeDiff > -bufferMs) {
+      scheduled.setMinutes(scheduled.getMinutes() + 1);
+      return scheduled;
+    }
+    
+    // If time has passed by more than buffer, schedule for tomorrow
     if (scheduled <= now) {
       scheduled.setDate(scheduled.getDate() + 1);
     }
@@ -117,6 +137,30 @@ class NotificationQueue {
       [userId, limit, offset]
     );
 
+    return rows;
+  }
+
+  // Utility method to check queue status (useful for debugging)
+  static async getQueueStatus(userId = null) {
+    let query = `
+      SELECT 
+        status,
+        COUNT(*) as count,
+        MIN(scheduled_for) as next_scheduled,
+        MAX(created_at) as latest
+      FROM notification_queue
+    `;
+    
+    const params = [];
+    
+    if (userId) {
+      query += ` WHERE user_id = ?`;
+      params.push(userId);
+    }
+    
+    query += ` GROUP BY status ORDER BY status`;
+    
+    const [rows] = await db.query(query, params);
     return rows;
   }
 }

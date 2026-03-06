@@ -9,6 +9,8 @@ const FCMToken = require('../models/FCMToken');
 class NotificationScheduler {
   constructor() {
     this.isRunning = false;
+    // Set timezone for Tanzania (East Africa Time)
+    process.env.TZ = 'Africa/Dar_es_Salaam';
   }
 
   // Start the scheduler
@@ -34,7 +36,7 @@ class NotificationScheduler {
       const preferences = await NotificationPreference.getEnabledForCurrentTime();
       if (preferences.length === 0) return;
 
-      console.log(`📝 Queuing ${preferences.length} notifications for current time`);
+      console.log(`📝 Queuing ${preferences.length} notifications`);
 
       for (const pref of preferences) {
         const tokens = await FCMToken.getUserTokens(pref.user_id);
@@ -57,42 +59,51 @@ class NotificationScheduler {
 
       for (const notification of pending) {
         try {
+          // Ensure ALL data values are strings - FCM requirement
           const payload = {
             notification: {
-              title: notification.title,
-              body: notification.message
+              title: String(notification.title || ''),
+              body: String(notification.message || '')
             },
             data: {
               click_action: 'FLUTTER_NOTIFICATION_CLICK',
-              action_type: notification.action_type || 'no_action',
-              action_data: notification.action_data || '{}',
-              preference_id: notification.preference_id?.toString() || '',
-              screen: this.getScreenFromAction(notification.action_type)
+              action_type: String(notification.action_type || 'no_action'),
+              action_data: notification.action_data ? String(notification.action_data) : '{}',
+              preference_id: String(notification.preference_id || ''),
+              screen: String(this.getScreenFromAction(notification.action_type) || 'notifications'),
+              scheduled_for: notification.scheduled_for ? new Date(notification.scheduled_for).toISOString() : new Date().toISOString(),
+              sent_at: new Date().toISOString(),
+              notification_id: String(notification.id || '')
             },
-            token: notification.fcm_token,
+            token: String(notification.fcm_token),
             android: {
               priority: 'high',
               notification: {
                 channelId: 'health_tracker_channel',
                 icon: 'ic_notification',
                 color: '#2563eb',
-                sound: 'default' // ✅ Android-specific sound
+                sound: 'default',
+                clickAction: 'FLUTTER_NOTIFICATION_CLICK'
               }
             },
             apns: {
               payload: {
                 aps: {
-                  sound: 'default' // ✅ iOS-specific sound
+                  sound: 'default',
+                  badge: 1
                 }
+              },
+              headers: {
+                'apns-priority': '10'
               }
             }
           };
 
-          await messaging.send(payload);
+          const response = await messaging.send(payload);
           await NotificationQueue.markAsSent(notification.id);
-          console.log(`✅ Notification sent: ${notification.id}`);
         } catch (err) {
           console.error(`❌ Failed to send notification ${notification.id}:`, err.message);
+          
           await NotificationQueue.markAsFailed(notification.id, err.message);
 
           // Remove invalid tokens
