@@ -1,3 +1,4 @@
+// models/User.js
 const db = require('../config/db');
 
 class User {
@@ -37,6 +38,28 @@ class User {
     await db.query(
       `UPDATE users SET google_id=? WHERE id=?`,
       [googleId, userId]
+    );
+  }
+
+  static async saveLoginOTP(userId, otp, expiry) {
+    await db.query(
+      `UPDATE users SET login_otp=?, login_otp_expires=? WHERE id=?`,
+      [otp, expiry, userId]
+    );
+  }
+
+  static async verifyLoginOTP(userId, otp) {
+    const [rows] = await db.query(
+      `SELECT * FROM users WHERE id=? AND login_otp=? AND login_otp_expires > NOW()`,
+      [userId, otp]
+    );
+    return rows[0];
+  }
+
+  static async clearLoginOTP(userId) {
+    await db.query(
+      `UPDATE users SET login_otp=NULL, login_otp_expires=NULL WHERE id=?`,
+      [userId]
     );
   }
 

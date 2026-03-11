@@ -1,8 +1,9 @@
+// controllers/authController.js
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 const { comparePassword, hashPassword } = require('../services/passwordService');
 const { generateOTP } = require('../services/otpService');
-const { sendOTP, sendWelcomeEmail } = require('../services/emailService');
+const { sendOTP, sendWelcomeEmail, sendLoginOTP } = require('../services/emailService');
 const { OAuth2Client } = require('google-auth-library');
 require('dotenv').config();
 
@@ -80,17 +81,18 @@ class AuthController {
       sendWelcomeEmail(email, full_name.trim())
         .catch(err => console.error("Welcome email failed:", err.message));
 
-      const token = generateToken(newUser);
+      // Generate and send OTP for login verification
+      const loginOtp = generateOTP();
+      const loginOtpExpiry = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+      
+      await User.saveLoginOTP(userId, loginOtp, loginOtpExpiry);
+      await sendLoginOTP(email, loginOtp, full_name.trim());
 
       return res.status(201).json({ 
-        message: "User registered successfully.", 
-        user: {
-          id: newUser.id,
-          full_name: newUser.full_name,
-          email: newUser.email,
-          profile_pic: newUser.profile_pic
-        },
-        token 
+        message: "User registered successfully. Please check your email for OTP verification.", 
+        requiresOtpVerification: true,
+        userId: newUser.id,
+        email: newUser.email
       });
     } catch (err) {
       console.error('Registration error:', err);
@@ -117,10 +119,46 @@ class AuthController {
       const validPassword = await comparePassword(password, user.password);
       if (!validPassword) return res.status(400).json({ message: "Invalid credentials." });
 
-      const token = generateToken(user);
+      // Generate and send OTP for login verification
+      const loginOtp = generateOTP();
+      const loginOtpExpiry = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
       
+      await User.saveLoginOTP(user.id, loginOtp, loginOtpExpiry);
+      await sendLoginOTP(email, loginOtp, user.full_name);
+
       res.json({ 
-        message: "Login successful.", 
+        message: "OTP sent to your email. Please verify to continue.",
+        requiresOtpVerification: true,
+        userId: user.id,
+        email: user.email
+      });
+    } catch (err) {
+      console.error('Login error:', err);
+      return res.status(500).json({ message: "Login failed. Please try again." });
+    }
+  }
+
+  static async verifyLoginOTP(req, res) {
+    try {
+      const { userId, otp } = req.body;
+
+      if (!userId || !otp) {
+        return res.status(400).json({ message: "User ID and OTP required." });
+      }
+
+      const user = await User.verifyLoginOTP(userId, otp);
+      if (!user) {
+        return res.status(400).json({ message: "Invalid or expired OTP." });
+      }
+
+      // Clear the used OTP
+      await User.clearLoginOTP(userId);
+
+      // Generate JWT token
+      const token = generateToken(user);
+
+      res.json({ 
+        message: "OTP verified successfully.",
         token,
         user: {
           id: user.id,
@@ -130,8 +168,37 @@ class AuthController {
         }
       });
     } catch (err) {
-      console.error('Login error:', err);
-      return res.status(500).json({ message: "Login failed. Please try again." });
+      console.error('Verify login OTP error:', err);
+      res.status(500).json({ message: "OTP verification failed." });
+    }
+  }
+
+  static async resendLoginOTP(req, res) {
+    try {
+      const { userId } = req.body;
+
+      if (!userId) {
+        return res.status(400).json({ message: "User ID required." });
+      }
+
+      const user = await User.findById(userId);
+      if (!user) {
+        return res.status(404).json({ message: "User not found." });
+      }
+
+      // Generate new OTP
+      const loginOtp = generateOTP();
+      const loginOtpExpiry = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+      
+      await User.saveLoginOTP(userId, loginOtp, loginOtpExpiry);
+      await sendLoginOTP(user.email, loginOtp, user.full_name);
+
+      res.json({ 
+        message: "OTP resent successfully. Please check your email."
+      });
+    } catch (err) {
+      console.error('Resend OTP error:', err);
+      res.status(500).json({ message: "Failed to resend OTP." });
     }
   }
 
@@ -182,6 +249,7 @@ class AuthController {
         }
       }
 
+      // Google login bypasses OTP - generate token directly
       const jwtToken = generateToken(user);
       
       res.json({ 
@@ -288,6 +356,7 @@ class AuthController {
         await User.updateGoogleId(user.id, googleId);
       }
 
+      // Google login bypasses OTP - generate token directly
       const jwtToken = generateToken(user);
       
       res.json({ 

@@ -1,3 +1,4 @@
+// services/emailService.js
 const nodemailer = require('nodemailer');
 
 const transporter = nodemailer.createTransport({
@@ -29,14 +30,38 @@ exports.sendOTP = async (email, otp) => {
   await transporter.sendMail(mailOptions);
 };
 
+exports.sendLoginOTP = async (email, otp, fullName) => {
+  const mailOptions = {
+    from: `"Digital Health Tracker" <${process.env.EMAIL_USER}>`,
+    to: email,
+    subject: '🔐 Login Verification Code',
+    html: `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e5e7eb; border-radius: 10px;">
+        <h2 style="color: #2563eb; text-align: center;">Digital Health Tracker</h2>
+        <p style="font-size: 16px;">Hello <strong>${fullName}</strong>,</p>
+        <p>Your login verification code is:</p>
+        <div style="background-color: #f3f4f6; padding: 20px; text-align: center; border-radius: 8px; margin: 20px 0;">
+          <h1 style="font-size: 48px; letter-spacing: 8px; color: #1e3a8a; margin: 0;">${otp}</h1>
+        </div>
+        <p style="color: #ef4444; font-weight: bold;">⚠️ This code will expire in 10 minutes.</p>
+        <p style="color: #6b7280; font-size: 14px;">If you didn't attempt to login, please secure your account immediately.</p>
+        <hr style="border: 1px solid #e5e7eb; margin: 20px 0;" />
+        <p style="color: #6b7280; font-size: 12px; text-align: center;">&copy; 2026 Digital Health Tracker. All rights reserved.</p>
+      </div>
+    `
+  };
+
+  await transporter.sendMail(mailOptions);
+};
+
 exports.sendWelcomeEmail = async (email, fullName) => {
   const mailOptions = {
     from: `"Digital Health Tracker" <${process.env.EMAIL_USER}>`,
     to: email,
     subject: '🎉 Welcome to Digital Health Tracker!',
     html: `
-      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-        <h2 style="color: #2563eb;">Welcome, ${fullName}! 👋</h2>
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e5e7eb; border-radius: 10px;">
+        <h2 style="color: #2563eb; text-align: center;">Welcome, ${fullName}! 👋</h2>
         
         <p>Thank you for joining <strong>Digital Health Tracker</strong>.</p>
         
@@ -56,7 +81,7 @@ exports.sendWelcomeEmail = async (email, fullName) => {
         <strong>The DHT Team</strong></p>
         
         <hr style="border: 1px solid #e5e7eb;" />
-        <p style="color: #6b7280; font-size: 12px;">&copy; 2026 Digital Health Tracker. All rights reserved.</p>
+        <p style="color: #6b7280; font-size: 12px; text-align: center;">&copy; 2026 Digital Health Tracker. All rights reserved.</p>
       </div>
     `
   };
