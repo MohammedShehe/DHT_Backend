@@ -23,7 +23,9 @@ const notificationScheduler = require('./services/notificationScheduler');
 const notificationRoutes = require('./routes/notificationRoutes');
 const mealRoutes = require('./routes/mealRoutes');
 const workoutDetailRoutes = require('./routes/workoutDetailRoutes');
-const sleepActivityRoutes = require('./routes/sleepActivityRoutes')
+const sleepActivityRoutes = require('./routes/sleepActivityRoutes');
+const hydrationActivityRoutes = require('./routes/hydrationActivityRoutes');
+
 
 // Import food models for initialization
 const FoodCategory = require('./models/FoodCategory');
@@ -65,7 +67,8 @@ app.use('/api/goals', goalRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/meals', mealRoutes);
 app.use('/api/workout-details', workoutDetailRoutes);
-app.use('/api/sleep-activity', sleepActivityRoutes)
+app.use('/api/sleep-activity', sleepActivityRoutes);
+app.use('/api/hydration-activity', hydrationActivityRoutes);
 
 // Health check endpoint
 app.get('/health', (req, res) => {
