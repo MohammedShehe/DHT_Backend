@@ -7,7 +7,8 @@ class SleepActivity {
         try {
             // Parse time strings (format: "HH:MM:SS" or "HH:MM")
             const parseTimeToMinutes = (timeStr) => {
-                const parts = timeStr.split(':');
+                const timeStrClean = timeStr.toString().trim();
+                const parts = timeStrClean.split(':');
                 const hours = parseInt(parts[0], 10);
                 const minutes = parseInt(parts[1], 10);
                 return (hours * 60) + minutes;
@@ -17,20 +18,24 @@ class SleepActivity {
             const wakeTimeMinutes = parseTimeToMinutes(wake_time);
             
             let totalMinutes;
-            if (wakeTimeMinutes > bedtimeMinutes) {
-                // Wake time is later on the same day
-                totalMinutes = wakeTimeMinutes - bedtimeMinutes;
+            
+            // Overnight sleep: bedtime is later than wake_time
+            if (bedtimeMinutes > wakeTimeMinutes) {
+                totalMinutes = (24 * 60 - bedtimeMinutes) + wakeTimeMinutes;
             } else {
-                // Overnight sleep (wake time is next day)
+                // Same day sleep (nap)
+                totalMinutes = wakeTimeMinutes - bedtimeMinutes;
+            }
+            
+            // Safety: ensure positive
+            if (totalMinutes < 0) {
                 totalMinutes = (24 * 60 - bedtimeMinutes) + wakeTimeMinutes;
             }
             
             const totalHours = totalMinutes / 60;
-            
-            // Round to 2 decimal places
             const rounded = Math.round(totalHours * 100) / 100;
             
-            return isNaN(rounded) ? 0 : rounded;
+            return isNaN(rounded) || rounded < 0 ? 0 : rounded;
         } catch (error) {
             console.error('Error calculating total hours:', error);
             return 0;
@@ -174,7 +179,7 @@ class SleepActivity {
                 DAYOFWEEK(sleep_date) as day_of_week,
                 DATE_FORMAT(sleep_date, '%W') as day_name,
                 COUNT(*) as log_count,
-                ROUND(AVG(total_hours), 2) as avg_hours,
+                ROUND(AVG(ABS(total_hours)), 2) as avg_hours,
                 ROUND(AVG(interruptions), 1) as avg_interruptions,
                 SUM(CASE WHEN sleep_quality = 'Excellent' THEN 1 ELSE 0 END) as excellent_count,
                 SUM(CASE WHEN sleep_quality = 'Good' THEN 1 ELSE 0 END) as good_count,
@@ -195,7 +200,7 @@ class SleepActivity {
             `SELECT 
                 sleep_date,
                 DATE_FORMAT(sleep_date, '%a, %b %d') as formatted_date,
-                total_hours,
+                ABS(total_hours) as total_hours,
                 interruptions,
                 sleep_quality,
                 bedtime,
@@ -213,10 +218,10 @@ class SleepActivity {
         const [rows] = await db.query(
             `SELECT 
                 COUNT(*) as total_logs,
-                ROUND(AVG(total_hours), 2) as avg_hours,
+                ROUND(AVG(ABS(total_hours)), 2) as avg_hours,
                 ROUND(AVG(interruptions), 1) as avg_interruptions,
-                MIN(total_hours) as min_hours,
-                MAX(total_hours) as max_hours,
+                MIN(ABS(total_hours)) as min_hours,
+                MAX(ABS(total_hours)) as max_hours,
                 SUM(CASE WHEN sleep_quality = 'Excellent' THEN 1 ELSE 0 END) as excellent_count,
                 SUM(CASE WHEN sleep_quality = 'Good' THEN 1 ELSE 0 END) as good_count,
                 SUM(CASE WHEN sleep_quality = 'Fair' THEN 1 ELSE 0 END) as fair_count,
@@ -247,7 +252,7 @@ class SleepActivity {
     static async getWeeklyComparison(userId, currentStartDate, currentEndDate, previousStartDate, previousEndDate) {
         const [current] = await db.query(
             `SELECT 
-                ROUND(AVG(total_hours), 2) as avg_hours,
+                ROUND(AVG(ABS(total_hours)), 2) as avg_hours,
                 ROUND(AVG(interruptions), 1) as avg_interruptions,
                 COUNT(*) as total_logs
              FROM sleep_activity_logs
@@ -257,7 +262,7 @@ class SleepActivity {
 
         const [previous] = await db.query(
             `SELECT 
-                ROUND(AVG(total_hours), 2) as avg_hours,
+                ROUND(AVG(ABS(total_hours)), 2) as avg_hours,
                 ROUND(AVG(interruptions), 1) as avg_interruptions,
                 COUNT(*) as total_logs
              FROM sleep_activity_logs
@@ -303,7 +308,7 @@ class SleepActivity {
         const [stats] = await db.query(
             `SELECT 
                 COUNT(*) as total_logs,
-                ROUND(AVG(total_hours), 2) as avg_total_hours,
+                ROUND(AVG(ABS(total_hours)), 2) as avg_total_hours,
                 ROUND(AVG(interruptions), 1) as avg_interruptions,
                 SUM(CASE WHEN sleep_quality = 'Excellent' THEN 1 ELSE 0 END) as excellent_count,
                 SUM(CASE WHEN sleep_quality = 'Good' THEN 1 ELSE 0 END) as good_count,
