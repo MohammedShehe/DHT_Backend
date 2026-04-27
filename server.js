@@ -25,6 +25,7 @@ const mealRoutes = require('./routes/mealRoutes');
 const workoutDetailRoutes = require('./routes/workoutDetailRoutes');
 const sleepActivityRoutes = require('./routes/sleepActivityRoutes');
 const hydrationActivityRoutes = require('./routes/hydrationActivityRoutes');
+const medicationRoutes = require('./routes/medicationRoutes');
 
 
 // Import food models for initialization
@@ -69,6 +70,7 @@ app.use('/api/meals', mealRoutes);
 app.use('/api/workout-details', workoutDetailRoutes);
 app.use('/api/sleep-activity', sleepActivityRoutes);
 app.use('/api/hydration-activity', hydrationActivityRoutes);
+app.use('/api/medications', medicationRoutes);
 
 // Health check endpoint
 app.get('/health', (req, res) => {
